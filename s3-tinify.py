@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
-import boto3, tinify, os, sys
+import boto3, tinify, os, sys, time
 import multiprocessing
+from multiprocessing import Process, Queue
 import creds
 
 try:
@@ -63,9 +64,6 @@ def make_temp_directory():
         if not os.path.exists("_temp"):
             temp_dir = os.makedirs(("_temp"))
 
-#start image processing
-success_count = 0
-
 def compress_save_image(image):
     print("Processing", image)
     img_name = str(image)
@@ -110,13 +108,60 @@ def compress_save_image(image):
         }
     )
     print(image, "has been marked as compressed!")
-    success_count += 1
     os.rmdir("_temp")
 
 
+def read_image_queue(queue):
+    while True:
+        img = queue.get()
+        compress_save_image(img)
+        if img == "BREAK":
+            break
+
+def write_image_queue(image, queue):
+    queue.put(source_list[image])
+    if image == "BREAK":
+        queue.put("BREAK")
+
+
 if __name__ == '__main__':
+    # TODO build queue/process workers
     get_s3_objects()
     make_temp_directory()
+
+    for img in range(len(source_list)):
+        queue = Queue()
+        reader_process = Process(
+            target = read_image_queue,
+            args = ((queue), )
+        )
+
+        reader_process.daemon = True
+        reader_process.start()
+
+        start_time = time.time()
+
+        write_image_queue(img, queue)
+        reader_process.join()
+        end_time = time.time() - start_time
+        print("Processing took", end_time, "seconds.")
+
+    '''
+    for count in [10**4, 10**5, 10**6]:
+        queue = Queue()   # reader() reads from queue
+                          # writer() writes to queue
+        reader_p = Process(target=reader, args=((queue),))
+        reader_p.daemon = True
+        reader_p.start()        # Launch reader() as a separate python process
+
+        _start = time.time()
+        writer(count, queue)    # Send a lot of stuff to reader()
+        reader_p.join()         # Wait for the reader to finish
+        print "Sending %s numbers to Queue() took %s seconds" % (count, 
+            (time.time() - _start))
+    '''
+
+    '''
     jobs = []
     for i in range(len(source_list)):
         proc = multiprocessing.Process(
@@ -125,3 +170,4 @@ if __name__ == '__main__':
         )
         jobs.append(proc)
         proc.start()
+    '''
